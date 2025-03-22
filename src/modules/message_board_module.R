@@ -1,8 +1,10 @@
 # Define UI for Message Board Module
 messageBoardUI <- function(id) {
   ns <- NS(id) # Namespace for unique IDs within the module
-  sidebarLayout(
+  
+  fluidPage(
     sidebarPanel(
+      selectInput(ns("authorInput"), "Your Name:", choices = c("John", "Jesse", "GB")),
       textInput(ns("commentInput"), "Leave a Comment:", placeholder = "Write your message here..."),
       actionButton(ns("addComment"), "Post Comment")
     ),
@@ -13,65 +15,114 @@ messageBoardUI <- function(id) {
   )
 }
 
+
 # Define Server Logic for Message Board Module
 messageBoardServer <- function(id) {
   moduleServer(id, function(input, output, session) {
-    ns <- session$ns # Namespace for handling IDs
+    ns <- session$ns
     
-    # Reactive values to store comments and reactions
-    messages <- reactiveValues(data = data.frame(
-      Comment = character(),
-      Reactions = integer(),
-      stringsAsFactors = FALSE
-    ))
+    # Reactive list to store comments and replies
+    messages <- reactiveVal(list())
     
-    # Add a new comment
-    observeEvent(input$addComment, {
-      if (input$commentInput != "") {
-        newComment <- data.frame(
-          Comment = input$commentInput,
-          Reactions = 0,
-          stringsAsFactors = FALSE
-        )
-        messages$data <- rbind(messages$data, newComment)
-        updateTextInput(session, "commentInput", value = "") # Clear input field
-      }
-    })
-    
-    # Render the message board dynamically
-    output$messageBoard <- renderUI({
-      if (nrow(messages$data) == 0) {
-        h4("No comments yet. Be the first to post!")
+    # Function to add a comment or a reply.
+    addComment <- function(parentId = NULL, author, text) {
+      newComment <- list(
+        id = as.character(Sys.time()),  # use timestamp as unique ID
+        parentId = parentId,
+        author = author,
+        text = text,
+        replies = list()
+      )
+      if (is.null(parentId)) {
+        messages(c(messages(), list(newComment)))
       } else {
-        commentList <- lapply(1:nrow(messages$data), function(i) {
-          div(
-            p(strong("Comment:"), messages$data$Comment[i]),
-            p("Reactions:", messages$data$Reactions[i]),
-            actionButton(ns(paste0("react_", i)), "React"),
-            actionButton(ns(paste0("delete_", i)), "Delete"),
-            tags$hr()
-          )
-        })
-        do.call(tagList, commentList)
+        messages(addReply(messages(), parentId, newComment))
+      }
+    }
+    
+    # Recursive function to add a reply into the right place.
+    addReply <- function(comments, parentId, reply) {
+      for (i in seq_along(comments)) {
+        if (comments[[i]]$id == parentId) {
+          comments[[i]]$replies <- c(comments[[i]]$replies, list(reply))
+          return(comments)
+        } else if (length(comments[[i]]$replies) > 0) {
+          comments[[i]]$replies <- addReply(comments[[i]]$replies, parentId, reply)
+        }
+      }
+      comments
+    }
+    
+    # Recursive helper function to find a comment by id.
+    findCommentById <- function(comments, id) {
+      for (comment in comments) {
+        if (comment$id == id) return(comment)
+        if (length(comment$replies) > 0) {
+          found <- findCommentById(comment$replies, id)
+          if (!is.null(found)) return(found)
+        }
+      }
+      NULL
+    }
+    
+    # Render the message board UI based on the comments.
+    output$messageBoard <- renderUI({
+      renderComments(messages())
+    })
+    
+    # Recursively build the comment UI with an attached reply button.
+    renderComments <- function(comments) {
+      lapply(comments, function(comment) {
+        div(
+          p(strong(comment$author), ": ", comment$text),
+          # Notice the onclick attribute! When clicked, it sets input$reply_click to the comment id.
+          actionButton(
+            inputId = ns(paste0("reply_", comment$id)),
+            label = "Reply",
+            onclick = sprintf("Shiny.setInputValue('%s', '%s', {priority: 'event'})",
+                              ns("reply_click"), comment$id)
+          ),
+          # Recursively render replies with indentation.
+          div(style = "margin-left:20px;", renderComments(comment$replies)),
+          tags$hr()
+        )
+      }) %>% tagList()
+    }
+    
+    # Handle posting a new root-level comment.
+    observeEvent(input$addComment, {
+      if (nzchar(input$authorInput) && nzchar(input$commentInput)) {
+        addComment(NULL, input$authorInput, input$commentInput)
+        updateTextInput(session, "commentInput", value = "")
       }
     })
     
-    # React to comments
-    observe({
-      lapply(1:nrow(messages$data), function(i) {
-        observeEvent(input[[paste0("react_", i)]], {
-          messages$data$Reactions[i] <- messages$data$Reactions[i] + 1
-        })
-      })
-    })
-    
-    # Delete comments
-    observe({
-      lapply(1:nrow(messages$data), function(i) {
-        observeEvent(input[[paste0("delete_", i)]], {
-          messages$data <- messages$data[-i, ]
-        })
-      })
+    # Single observer that catches every reply click via the "reply_click" input.
+    observeEvent(input$reply_click, {
+      clicked_id <- input$reply_click
+      # Retrieve the comment details so we can show the author’s name in the modal.
+      clickedComment <- findCommentById(messages(), clicked_id)
+      if (!is.null(clickedComment)) {
+        showModal(modalDialog(
+          title = paste("Reply to", clickedComment$author),
+          textInput(ns("replyInput"), "Your Reply:", placeholder = "Write your reply here..."),
+          textInput(ns("replyAuthor"), "Your Name:", placeholder = "Enter your name..."),
+          footer = tagList(
+            modalButton("Cancel"),
+            actionButton(ns("submitReply"), "Post Reply")
+          )
+        ))
+        
+        # One-time observer for when the user clicks "Post Reply" in the modal.
+        observeEvent(input$submitReply, {
+          # Ensure both reply fields have content.
+          req(input$replyInput, input$replyAuthor)
+          addComment(clicked_id, input$replyAuthor, input$replyInput)
+          removeModal()
+        }, ignoreInit = TRUE, once = TRUE)
+      }
     })
   })
 }
+
+

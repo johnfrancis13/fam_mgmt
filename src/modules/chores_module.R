@@ -41,7 +41,7 @@ choresServer <- function(id) {
       newChore <- data.frame(
         Chore = input$choresInput,
         AssignedTo = input$assignTo,
-        DueDate = input$dueDate,
+        DueDate = format(as.POSIXct(input$dueDate), "%Y-%m-%d") ,
         Recurrence = input$recurrence,
         Status = "Pending",
         stringsAsFactors = FALSE
