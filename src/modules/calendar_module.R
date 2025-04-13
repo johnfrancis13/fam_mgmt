@@ -57,7 +57,7 @@ calendarUI <- function(id) {
 
 # Define Server Logic for Calendar Module
 # Updated Server Logic for the Calendar Module
-calendarServer <- function(id) {
+calendarServer <- function(id, db) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     

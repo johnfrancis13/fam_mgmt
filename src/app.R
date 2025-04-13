@@ -1,38 +1,81 @@
 # Load required libraries
 library(shiny)
-# app.R
-source("modules/chores_module.R")
-source("modules/finances_module.R")
-source("modules/Shopping_list_module.R")
-source("modules/meal_planning_module.R")
-source("modules/calendar_module.R")
-source("modules/message_board_module.R")
+library(DBI)
+library(RSQLite)
 
 ui <- fluidPage(
   titlePanel("Family Management App"),
-  tabsetPanel(
-    tabPanel("Chores", choresUI("chores")),
-    tabPanel("Finances", financesUI("finances")),
-    tabPanel("Shopping list", shopping_listUI("shopping")),
-    tabPanel("Meal Planning", mealPlanUI("meal_plan")),
-    tabPanel("Calendar", calendarUI("calendar")),
-    tabPanel("Message Board", messageBoardUI("messageBoard"))
-  )
+  
+  # Add login UI at the top
+  shinyauthr::loginUI("login"),
+  
+  # Use conditional UI to show the rest of the app only after login
+  uiOutput("auth_content")
+
+
 )
 
 server <- function(input, output, session) {
-  shopping_list <- reactiveValues(data = data.frame(
-    Item = character(),
-    Quantity = numeric(),
-    stringsAsFactors = FALSE
-  ))
+  # app.R
+  source("utils.R",local = TRUE)
+  source("modules/home_module.R",local = TRUE)
+  source("modules/chores_module.R",local = TRUE)
+  source("modules/finances_module.R",local = TRUE)
+  source("modules/Shopping_list_module.R",local = TRUE)
+  source("modules/meal_planning_module.R",local = TRUE)
+  source("modules/calendar_module.R",local = TRUE)
+  source("modules/message_board_module.R",local = TRUE)
+  source("modules/fitness_module.R",local = TRUE)
   
-  choresServer("chores")
-  financesServer("finances")
-  shopping_listServer("shopping",shopping_list)
-  mealPlanServer("meal_plan",shopping_list)
-  calendarServer("calendar")
-  messageBoardServer("messageBoard")
+  # Open database connection
+  db <- dbConnect(SQLite(), "../data/family_management.db")
+  ensure_database_setup(db)
+  
+  user_base <- data.frame(
+    user = c("John", "Jess", "GB"),
+    password = sapply(c("password123", "mypassword", "anotherpassword"), digest::digest), # Hashed passwords
+    stringsAsFactors = FALSE
+  )
+  
+  # Implement login logic using shinyauthr
+  credentials <- shinyauthr::loginServer(
+    id = "login",
+    data = user_base,
+    user_col ="user",
+    pwd_col = "password",
+    log_out = reactiveVal(FALSE)
+  )
+  
+  # Render conditional app content after login
+  output$auth_content <- renderUI({
+    req(credentials()$user_auth) # Only display content if authenticated
+    
+    tabsetPanel(
+      tabPanel("Home", homePageUI("home")),
+      tabPanel("Chores", choresUI("chores")),
+      tabPanel("Finances", financesUI("finances")),
+      tabPanel("Shopping list", shopping_listUI("shopping")),
+      tabPanel("Meal Planning", mealPlanUI("meal_plan")),
+      tabPanel("Calendar", calendarUI("calendar")),
+      tabPanel("Message Board", messageBoardUI("messageBoard")),
+      tabPanel("Fitness", fitnessUI("fitness"))
+    )
+  })
+  
+  homePageServer("home", db)
+  choresServer("chores", db)
+  financesServer("finances", db)
+  shopping_listServer("shopping",db)
+  mealPlanServer("meal_plan",db)
+  calendarServer("calendar", db)
+  messageBoardServer("messageBoard", db)
+  fitnessServer("fitness", db)
+  
+  # Close the connection when the session ends
+  session$onSessionEnded(function() {
+    dbDisconnect(db)
+  })
+  
 }
 
 shinyApp(ui, server)

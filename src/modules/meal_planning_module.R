@@ -15,7 +15,7 @@ mealPlanUI <- function(id) {
 }
 
 
-mealPlanServer <- function(id,shopping_list) {
+mealPlanServer <- function(id,db) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     

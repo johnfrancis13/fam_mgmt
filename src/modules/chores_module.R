@@ -1,102 +1,113 @@
 library(shiny)
 library(dplyr)
+library(lubridate)
 
 # Define UI for Chores Module
 choresUI <- function(id) {
   ns <- NS(id) # Namespace for unique IDs
   sidebarLayout(
     sidebarPanel(
+      h4("Add a new chore"),
       textInput(ns("choresInput"), "Enter a New Chore:", placeholder = "E.g., Wash dishes"),
       selectInput(ns("assignTo"), "Assign to:", choices = c("John", "Jesse", "GB")),
       dateInput(ns("dueDate"), "Due Date:", value = Sys.Date()), # Add due date field
       selectInput(ns("recurrence"), "Recurrence:", choices = c("None", "Daily", "Weekly", "Monthly", "Yearly")),
-      actionButton(ns("addChore"), "Add Chore")
+      actionButton(ns("addChore"), "Add Chore"),
+      actionButton(ns("clearfinishedChores"), "Clear Completed Chores"),
+      actionButton(ns("clearChores"), "Clear All Chores"),
+      
+      # New section: Dropdown and Mark as Completed button
+      h4("Complete a chore"),
+      selectInput(ns("choreDropdown"), "Select a Chore to Complete:", choices = NULL), # Dynamically populated
+      actionButton(ns("markDropdownComplete"), "Mark as Completed") # Button to complete chore
     ),
     mainPanel(
       h3("Chores Dashboard"),
       tableOutput(ns("choresTable")), # Display chores list
-      h4("Click to Mark as Completed"),
-      uiOutput(ns("choresList")) # Dynamically render buttons for marking chores as completed
     )
   )
 }
 
+
 # Define Server Logic for Chores Module
-choresServer <- function(id) {
+choresServer <- function(id, db) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns # Namespace for handling IDs
-    
-    # Reactive values to store chores
-    chores <- reactiveValues(data = data.frame(
-      Chore = character(),
-      AssignedTo = character(),
-      DueDate = as.Date(character()),
-      Recurrence = character(),
-      Status = character(),
-      stringsAsFactors = FALSE
-    ))
-    
-    # Add a new chore
-    observeEvent(input$addChore, {
-      newChore <- data.frame(
-        Chore = input$choresInput,
-        AssignedTo = input$assignTo,
-        DueDate = format(as.POSIXct(input$dueDate), "%Y-%m-%d") ,
-        Recurrence = input$recurrence,
-        Status = "Pending",
-        stringsAsFactors = FALSE
-      )
-      chores$data <- rbind(chores$data, newChore)
-      updateTextInput(session, "choresInput", value = "") # Clear chore input
+
+    # Live-update fitness data using `reactivePoll`
+    refresh_data <- reactivePoll(
+      intervalMillis = 2000,  # Check for updates every 2 seconds
+      session = session,
+      checkFunc = function() {dbGetQuery(db, "SELECT COUNT(*), MAX(LastUpdated) FROM chores_db")},  # Detect table changes
+      valueFunc = function() { dbReadTable(db, "chores_db") }  # Load updated data
+    )
+
+    # Populate dropdown with Pending chores
+    observe({
+      chores_data <- refresh_data()
+      pending_chores <- chores_data %>%
+        filter(Status == "Pending") %>%
+        pull(Chore) # Get the chore names
+      
+      updateSelectInput(session, "choreDropdown", choices = pending_chores)
     })
     
+    # Handle Mark as Completed button click
+    observeEvent(input$markDropdownComplete, {
+      req(input$choreDropdown) # Ensure a chore is selected
+      
+      chores_data <- refresh_data() %>% filter(Chore %in% input$choreDropdown)
+      chores_data$DueDate <- ymd(chores_data$DueDate) # ensure values are dates in R
+      
+      if (chores_data$Recurrence[1] != "None") {
+        # Calculate the new due date
+        newDueDate <- case_when(
+          chores_data$Recurrence[1] == "Daily" ~ chores_data$DueDate[1] + 1,
+          chores_data$Recurrence[1] == "Weekly" ~ chores_data$DueDate[1] + 7,
+          chores_data$Recurrence[1] == "Monthly" ~ as.Date(chores_data$DueDate[1]) %m+% months(1),
+          chores_data$Recurrence[1] == "Yearly" ~ as.Date(chores_data$DueDate[1]) %m+% years(1)
+        )
+        
+        # Update the database with the new due date and status
+        dbExecute(
+          db,
+          "UPDATE chores_db SET DueDate = ?, LastUpdated = ? WHERE Chore = ?",
+          params = list(format(newDueDate, "%Y-%m-%d"), format(as.POSIXct(Sys.time())), chores_data$Chore[1])
+        )
+      } else {
+        # Delete chore if not recurring
+        dbExecute(
+          db,
+          "UPDATE chores_db SET Status = ?, LastUpdated = ? WHERE Chore = ?",
+          params = list("Completed", format(as.POSIXct(Sys.time())), chores_data$Chore[1])
+        )
+      }
+      
+    })
+    
+    # Add new chore
+    observeEvent(input$addChore, {
+      dbExecute(db, "INSERT INTO chores_db (Chore, AssignedTo, DueDate, Recurrence, Status, LastUpdated) VALUES (?, ?, ?, ?, ?,?)",
+                params = list(input$choresInput, input$assignTo, format(as.POSIXct(input$dueDate), "%Y-%m-%d"), input$recurrence, "Pending",format(as.POSIXct(Sys.time()))))
+      updateTextInput(session, "choresInput", value = "") # Clear chore input
+      refresh_data()
+    })
+
+    # Clear all completed chores
+    observeEvent(input$clearfinishedChores, {
+      dbExecute(db, "DELETE FROM chores_db WHERE Status = ?", params = list("Completed"))
+    })
+
+    # Clear all chores
+    observeEvent(input$clearChores, {
+      dbExecute(db, "DELETE FROM chores_db")
+    })
+
     # Render chores table
     output$choresTable <- renderTable({
-      chores$data
+      refresh_data() %>% select(-LastUpdated)  # Table now auto-refreshes!
     })
-    
-    # Dynamically generate buttons for marking chores as completed
-    output$choresList <- renderUI({
-      if (nrow(chores$data) > 0) {
-        lapply(1:nrow(chores$data), function(i) {
-          if (chores$data$Status[i] == "Pending") {
-            div(
-              p(strong("Chore:"), chores$data$Chore[i]),
-              p("Assigned To:", chores$data$AssignedTo[i]),
-              p("Due Date:", chores$data$DueDate[i]),
-              actionButton(ns(paste0("complete_", i)), "Mark as Completed"),
-              tags$hr()
-            )
-          }
-        }) %>% do.call(tagList, .)
-      } else {
-        h4("No chores assigned yet!")
-      }
-    })
-    
-    # Mark a chore as completed and handle recurrence
-    observe({
-      lapply(1:nrow(chores$data), function(i) {
-        observeEvent(input[[paste0("complete_", i)]], {
-          # If the chore is recurring, update its due date and status
-          if (chores$data$Recurrence[i] != "None") {
-            # Calculate the new due date based on the recurrence frequency
-            newDueDate <- switch(
-              chores$data$Recurrence[i],
-              "Daily" = chores$data$DueDate[i] + 1,
-              "Weekly" = chores$data$DueDate[i] + 7,
-              "Monthly" = seq(chores$data$DueDate[i], length = 2, by = "1 month")[2],
-              "Yearly" = seq(chores$data$DueDate[i], length = 2, by = "1 year")[2]
-            )
-            # Update the chore's due date and status
-            chores$data$DueDate[i] <- newDueDate
-            chores$data$Status[i] <- "Pending"
-          } else {
-            # Mark the chore as completed if it's not recurring
-            chores$data$Status[i] <- "Completed"
-          }
-        })
-      })
-    })
+
+
   })
 }

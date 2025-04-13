@@ -17,7 +17,7 @@ messageBoardUI <- function(id) {
 
 
 # Define Server Logic for Message Board Module
-messageBoardServer <- function(id) {
+messageBoardServer <- function(id, db) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
