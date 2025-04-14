@@ -71,9 +71,11 @@ shopping_listServer <- function(id, db) {
       # Remove selected items from the database
       dbExecute(
         db,
-        "DELETE FROM shopping_list_db WHERE Item IN (?)",
-        params = list(paste(input$selectedItems, collapse = "','"))
+        paste0("DELETE FROM shopping_list_db WHERE Item IN (", 
+               paste(rep("?", length(input$selectedItems)), collapse = ","), ")"),
+        params = input$selectedItems
       )
+      
     })
     
   })

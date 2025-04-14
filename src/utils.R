@@ -5,11 +5,19 @@
 # Open database connection
 
 # Edit dbs
-# db <- dbConnect(SQLite(), "data/family_management.db")
-# dbRemoveTable(db, "finances_db")
-# dbDisconnect(db)
+ # db <- dbConnect(SQLite(), "data/family_management.db")
+ # dbRemoveTable(db, "meal_planning_db")
+ # dbDisconnect(db)
 
 ensure_database_setup<- function(db) {
+  dbExecute(db, "CREATE TABLE IF NOT EXISTS meal_lookup_table (Item TEXT, 
+            Quantity INTEGER,
+            Unit TEXT)")
+  
+  # recreate the lookup table each time?
+  meal_plan <- readr::read_csv("../data/meal_lookup_table_editable.csv")
+  dbWriteTable(db, "meal_lookup_table", meal_plan, overwrite = TRUE, row.names = FALSE)
+  
   dbExecute(db, "CREATE TABLE IF NOT EXISTS shopping_list_db (Item TEXT, 
             Quantity INTEGER,
             Unit TEXT)")
@@ -25,7 +33,8 @@ ensure_database_setup<- function(db) {
   dbExecute(db, "CREATE TABLE IF NOT EXISTS calendar_db (Item TEXT, 
             Quantity INTEGER)")
   dbExecute(db, "CREATE TABLE IF NOT EXISTS meal_planning_db (Item TEXT, 
-            Quantity INTEGER)")
+            Date DATE,
+            NeedIngred TEXT)")
   dbExecute(db, "CREATE TABLE IF NOT EXISTS chores_db (Chore TEXT, 
             AssignedTo DATE,
             DueDate DATE,

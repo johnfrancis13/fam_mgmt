@@ -46,10 +46,9 @@ choresServer <- function(id, db) {
     observe({
       chores_data <- refresh_data()
       pending_chores <- chores_data %>%
-        filter(Status == "Pending") %>%
-        pull(Chore) # Get the chore names
+        filter(Status == "Pending")
       
-      updateSelectInput(session, "choreDropdown", choices = pending_chores)
+      updateSelectInput(session, "choreDropdown", choices = pending_chores$Chore)
     })
     
     # Handle Mark as Completed button click
