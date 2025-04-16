@@ -28,7 +28,7 @@ server <- function(input, output, session) {
   source("modules/fitness_module.R",local = TRUE)
   
   # Open database connection
-  db <- dbConnect(SQLite(), "../data/family_management.db")
+  db <- dbConnect(SQLite(), "data/family_management.db")
   ensure_database_setup(db)
   
   user_base <- data.frame(
