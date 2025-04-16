@@ -21,90 +21,93 @@ messageBoardServer <- function(id, db) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
-    # Reactive list to store comments and replies
-    messages <- reactiveVal(list())
+    # Live-update data using `reactivePoll`
+    refresh_data <- reactivePoll(
+      intervalMillis = 2000,  # Check for updates every 2 seconds
+      session = session,
+      checkFunc = function() { dbGetQuery(db, "SELECT COUNT(*) FROM message_board_db") },  # Detect table changes
+      valueFunc = function() { dbReadTable(db, "message_board_db") }  # Load updated data
+    )
     
-    # Function to add a comment or a reply.
-    addComment <- function(parentId = NULL, author, text) {
-      newComment <- list(
-        id = as.character(Sys.time()),  # use timestamp as unique ID
-        parentId = parentId,
-        author = author,
-        text = text,
-        replies = list()
-      )
-      if (is.null(parentId)) {
-        messages(c(messages(), list(newComment)))
-      } else {
-        messages(addReply(messages(), parentId, newComment))
-      }
-    }
-    
-    # Recursive function to add a reply into the right place.
-    addReply <- function(comments, parentId, reply) {
-      for (i in seq_along(comments)) {
-        if (comments[[i]]$id == parentId) {
-          comments[[i]]$replies <- c(comments[[i]]$replies, list(reply))
-          return(comments)
-        } else if (length(comments[[i]]$replies) > 0) {
-          comments[[i]]$replies <- addReply(comments[[i]]$replies, parentId, reply)
-        }
-      }
-      comments
-    }
-    
-    # Recursive helper function to find a comment by id.
-    findCommentById <- function(comments, id) {
-      for (comment in comments) {
-        if (comment$id == id) return(comment)
-        if (length(comment$replies) > 0) {
-          found <- findCommentById(comment$replies, id)
-          if (!is.null(found)) return(found)
-        }
-      }
-      NULL
-    }
+  
     
     # Render the message board UI based on the comments.
     output$messageBoard <- renderUI({
-      renderComments(messages())
+      message_data <- refresh_data()
+      if (nrow(message_data) > 0) {
+        renderComments(refresh_data())
+      } else {
+        h4("No comments on the message board.")
+      }
     })
     
     # Recursively build the comment UI with an attached reply button.
     renderComments <- function(comments) {
-      lapply(comments, function(comment) {
+      comment_list <- comments %>% group_by(threadID) %>% arrange(messageID,.by_group = TRUE) %>% 
+        summarise(comment_list=list(list(threadid=threadID,
+                                         messageid=messageID,
+                                         author=author,
+                                         comment=comment))) %>% pull(comment_list)
+      
+      lapply(comment_list, function(comment) {
         div(
-          p(strong(comment$author), ": ", comment$text),
-          # Notice the onclick attribute! When clicked, it sets input$reply_click to the comment id.
-          actionButton(
-            inputId = ns(paste0("reply_", comment$id)),
-            label = "Reply",
-            onclick = sprintf("Shiny.setInputValue('%s', '%s', {priority: 'event'})",
-                              ns("reply_click"), comment$id)
-          ),
-          # Recursively render replies with indentation.
-          div(style = "margin-left:20px;", renderComments(comment$replies)),
-          tags$hr()
+          style = "border: 1px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 8px; background-color: #f9f9f9;",
+          
+          # Thread comments
+          lapply(seq_along(comment$messageid), function(c) {
+            div(
+              style = "margin-bottom: 10px;",
+              p(
+                tags$span(style = "font-weight: bold; color: #333;", comment$author[c]),
+                tags$span(": "),
+                tags$span(style = "color: #555;", comment$comment[c])
+              ),
+              if (c < length(comment$messageid)) tags$hr()
+            )
+          }),
+          
+          # Buttons at the bottom
+          div(
+            style = "margin-top: 10px;",
+            tags$button(
+              type = "button",
+              class = "btn btn-sm btn-primary action-button",
+              onclick = sprintf("Shiny.setInputValue('%s', '%s', {priority: 'event'})",
+                                ns("reply_click"), comment$threadid[1]),
+              "Reply"
+            ),
+            tags$button(
+              type = "button",
+              class = "btn btn-sm btn-danger action-button",
+              style = "margin-left: 10px;",
+              onclick = sprintf("Shiny.setInputValue('%s', '%s', {priority: 'event'})",
+                                ns("delete_click"), comment$threadid[1]),
+              "Delete"
+            )
+          )
         )
       }) %>% tagList()
     }
     
+    
     # Handle posting a new root-level comment.
     observeEvent(input$addComment, {
-      if (nzchar(input$authorInput) && nzchar(input$commentInput)) {
-        addComment(NULL, input$authorInput, input$commentInput)
-        updateTextInput(session, "commentInput", value = "")
-      }
+      threadID = as.character(Sys.time())  # use timestamp as unique ID
+      messageID = paste0(threadID,"_1")
+      dbExecute(db, "INSERT INTO message_board_db (threadID ,messageID, author, comment) VALUES (?, ?, ?, ?)", 
+                params = list(threadID,messageID, input$authorInput, input$commentInput))
+      updateTextInput(session, "commentInput", value = "")
+      
     })
     
+    # Store the threadID for replying
+    activeThreadID <- reactiveVal(NULL)
+                                  
     # Single observer that catches every reply click via the "reply_click" input.
     observeEvent(input$reply_click, {
-      clicked_id <- input$reply_click
-      # Retrieve the comment details so we can show the author’s name in the modal.
-      clickedComment <- findCommentById(messages(), clicked_id)
-      if (!is.null(clickedComment)) {
-        showModal(modalDialog(
-          title = paste("Reply to", clickedComment$author),
+      activeThreadID(input$reply_click)
+      showModal(modalDialog(
+          title = "Reply",
           textInput(ns("replyInput"), "Your Reply:", placeholder = "Write your reply here..."),
           textInput(ns("replyAuthor"), "Your Name:", placeholder = "Enter your name..."),
           footer = tagList(
@@ -112,17 +115,46 @@ messageBoardServer <- function(id, db) {
             actionButton(ns("submitReply"), "Post Reply")
           )
         ))
-        
-        # One-time observer for when the user clicks "Post Reply" in the modal.
-        observeEvent(input$submitReply, {
-          # Ensure both reply fields have content.
-          req(input$replyInput, input$replyAuthor)
-          addComment(clicked_id, input$replyAuthor, input$replyInput)
-          removeModal()
-        }, ignoreInit = TRUE, once = TRUE)
-      }
     })
-  })
+        
+    # One-time observer for when the user clicks "Post Reply" in the modal.
+    observeEvent(input$submitReply, {
+          # Ensure both reply fields have content.
+          req(input$replyInput, input$replyAuthor, activeThreadID())
+          threadID <- activeThreadID()
+          new_id_n <- refresh_data()%>% filter(threadID %in% threadID) %>% nrow()+1
+          messageID = paste0(threadID,"_",new_id_n)
+          dbExecute(db, "INSERT INTO message_board_db (threadID ,messageID, author, comment) VALUES (?, ?, ?, ?)", 
+                    params = list(threadID,messageID, input$replyAuthor, input$replyInput))
+          removeModal()
+          activeThreadID(NULL)  # Clear after submission
+        })
+    
+    
+    observeEvent(input$delete_click, {
+      activeThreadID(input$delete_click)
+      showModal(modalDialog(
+        title = "Delete thread",
+        "Are you sure you want to delete this thread?",
+        footer = tagList(
+          modalButton("Cancel"),
+          actionButton(ns("confirmDelete"), "Yes, Delete", class = "btn-danger")
+        )
+      ))
+    })
+    
+    # One-time observer for when the user clicks "Post Reply" in the modal.
+    observeEvent(input$confirmDelete, {
+      # Ensure both reply fields have content.
+      req(activeThreadID())
+      threadID <- activeThreadID()
+      dbExecute(db, "DELETE FROM message_board_db WHERE threadID IN (?)", 
+                params = list(threadID))
+      removeModal()
+      activeThreadID(NULL)  # Clear after submission
+    })
+    
+    })
 }
 
 

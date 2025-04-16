@@ -6,8 +6,8 @@
 
 # Edit dbs
  # db <- dbConnect(SQLite(), "data/family_management.db")
- # dbRemoveTable(db, "meal_planning_db")
- # dbDisconnect(db)
+ #  dbRemoveTable(db, "calendar_db")
+ #  dbDisconnect(db)
 
 ensure_database_setup<- function(db) {
   dbExecute(db, "CREATE TABLE IF NOT EXISTS meal_lookup_table (Item TEXT, 
@@ -30,8 +30,10 @@ ensure_database_setup<- function(db) {
                     Plan TEXT,
                     Milestone TEXT,
                     Deadline DATE)")
-  dbExecute(db, "CREATE TABLE IF NOT EXISTS calendar_db (Item TEXT, 
-            Quantity INTEGER)")
+  dbExecute(db, "CREATE TABLE IF NOT EXISTS calendar_db (title TEXT, 
+            start DATE,
+            end DATE,
+            description TEXT)")
   dbExecute(db, "CREATE TABLE IF NOT EXISTS meal_planning_db (Item TEXT, 
             Date DATE,
             NeedIngred TEXT)")
@@ -42,8 +44,10 @@ ensure_database_setup<- function(db) {
             Status TEXT,
             LastUpdated DATE)")
 
-  dbExecute(db, "CREATE TABLE IF NOT EXISTS message_board_db (Item TEXT,
-            Quantity INTEGER)")
+  dbExecute(db, "CREATE TABLE IF NOT EXISTS message_board_db (threadID TEXT,
+            messageID TEXT,
+            author TEXT,
+            comment TEXT)")
 }
 
 

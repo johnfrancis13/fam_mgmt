@@ -42,6 +42,7 @@ choresServer <- function(id, db) {
       valueFunc = function() { dbReadTable(db, "chores_db") }  # Load updated data
     )
 
+    
     # Populate dropdown with Pending chores
     observe({
       chores_data <- refresh_data()

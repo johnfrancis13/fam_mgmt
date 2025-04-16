@@ -62,6 +62,8 @@ server <- function(input, output, session) {
     )
   })
   
+  observeEvent(credentials()$user_auth, {
+    req(credentials()$user_auth)  # ensure login is successful
   homePageServer("home", db)
   choresServer("chores", db)
   financesServer("finances", db)
@@ -70,6 +72,7 @@ server <- function(input, output, session) {
   calendarServer("calendar", db)
   messageBoardServer("messageBoard", db)
   fitnessServer("fitness", db)
+  })
   
   # Close the connection when the session ends
   session$onSessionEnded(function() {

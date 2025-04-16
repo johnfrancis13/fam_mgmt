@@ -6,15 +6,15 @@ financesUI <- function(id) {
     sidebarPanel(
       numericInput(ns("expenseAmount"), "Expense Amount:", value = 0, min = 0, step = 1),
       textInput(ns("expenseDesc"), "Description:", placeholder = "E.g., Monthly rent"),
-      actionButton(ns("addExpense"), "Add Expense"),
+      actionButton(ns("addExpense"), "Add Monthly Expense"),
       
       numericInput(ns("incAmount"), "Income Amount:", value = 0, min = 0, step = 1),
       textInput(ns("incDesc"), "Description:", placeholder = "E.g., Dad's salary"),
-      actionButton(ns("addIncome"), "Add Income"),
+      actionButton(ns("addIncome"), "Add Monthly Income"),
       
       # New section: Dropdown and Mark as Completed button
       h4("Remove an expense/income"),
-      selectInput(ns("rowDropdown"), "Select a row to remove:", choices = NULL), # Dynamically populated
+      selectInput(ns("finrowDropdown"), "Select a row to remove:", choices =  c("Waiting for data..." = ""), selected = NULL), # Dynamically populated
       actionButton(ns("editDropdown"), "Remove row"), # Button to remove an item
       actionButton(ns("clearAll"), "Remove all rows")
     ),
@@ -76,22 +76,24 @@ financesServer <- function(id, db) {
     
     # Remove rows
     observeEvent(input$editDropdown, {
-      req(input$rowDropdown) # Ensure a row is selected
+      req(input$finrowDropdown) # Ensure a row is selected
       
       dbExecute(db, "DELETE FROM finances_db WHERE Item IN (?)", 
-                params = list(paste(input$rowDropdown, collapse = "','")))
+                params = list(paste(input$finrowDropdown, collapse = "','")))
       
       
     })
-    
-    # Populate dropdown with Rows
+  
     observe({
       finance_data <- refresh_data()
       finance_items <- finance_data %>%
         pull(Item) # Get the chore names
-      
-      updateSelectInput(session, "rowDropdown", choices = finance_items)
+
+      print("Here")
+      print(finance_items)
+      updateSelectInput(session, "finrowDropdown", choices = finance_items)
     })
+
     
     # Clear all rows
     observeEvent(input$clearAll, {
@@ -116,9 +118,9 @@ financesServer <- function(id, db) {
         # Create a bar plot
         bar_midpoints <- barplot(
           c(total_income, total_expense, diff_income_budget),
-          names.arg = c("Total Income", "Budget", "Savings"),
+          names.arg = c("Monthly Income", "Monthly Budget", "Monthly Savings"),
           col = c( "blue", "red","green"),
-          main = "Income vs. Budget Difference",
+          main = "Monthly Income vs. Budget Difference",
           ylab = "Amount",
           ylim = c(min_value*1.2, max_value * 1.2)  
         )
@@ -146,7 +148,7 @@ financesServer <- function(id, db) {
         ggplot(expenses, aes(x = "", y = Quantity, fill = Item)) +
           geom_bar(stat = "identity", width = 1) +
           coord_polar("y", start = 0) +  # Convert to polar coordinates for pie/donut style
-          labs(title = "Expense Breakdown", fill = "Expenses") +
+          labs(title = "Monthly Expense Breakdown", fill = "Expenses") +
           theme_void() +  # Clean theme
           theme(
             plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
